@@ -20,7 +20,7 @@ def get_info_endpoint():
     except Exception as e:
         return jsonify({"error": f"Could not retrieve info: {e}"}), 500
 
-# --- FINAL, CORRECTED Streaming Endpoint ---
+# --- Streaming Endpoint (No changes) ---
 @app.route('/stream')
 def stream_video_endpoint():
     tiktok_url = request.args.get('url')
@@ -28,11 +28,6 @@ def stream_video_endpoint():
         return jsonify({"error": "Missing 'url' query parameter"}), 400
 
     try:
-        # --- THE DEFINITIVE FIX ---
-        # Instead of finding the 'yt-dlp' executable, we tell the Python
-        # interpreter to run the 'yt_dlp' module directly.
-        # This is the standard and most robust way to do this.
-        # sys.executable ensures we use the same python that is running our app.
         command = [
             sys.executable, '-m', 'yt_dlp',
             '--format', 'best[ext=mp4]/best',
@@ -65,10 +60,52 @@ def stream_video_endpoint():
         return Response(generate_stream(), mimetype='video/mp4')
 
     except Exception as e:
-        # This will catch any errors in starting the process itself.
         return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
-# Root endpoint
+# --- NEW API Endpoint for SRT Subtitles ---
+@app.route('/srt')
+def get_srt_endpoint():
+    tiktok_url = request.args.get('url')
+    # Allow specifying language, default to English ('en')
+    lang = request.args.get('lang', 'en')
+
+    if not tiktok_url:
+        return jsonify({"error": "Missing 'url' query parameter"}), 400
+
+    try:
+        # Command to get auto-captions, convert to SRT, and print to stdout
+        command = [
+            sys.executable, '-m', 'yt_dlp',
+            '--write-auto-subs',    # Get automatically generated captions
+            '--sub-lang', lang,       # Specify the language
+            '--skip-download',      # Don't download the video
+            '--sub-format', 'srt',     # Specify SRT format
+            '--output', '-',          # Pipe output to stdout
+            tiktok_url
+        ]
+
+        # Use Popen to run the command
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        
+        # Use communicate() to get all output once the process finishes
+        stdout, stderr = process.communicate()
+        
+        srt_content = stdout.decode('utf-8', 'ignore')
+        stderr_output = stderr.decode('utf-8', 'ignore')
+
+        # Check if we actually got SRT content
+        if srt_content.strip():
+            # Return the SRT content as plain text
+            return Response(srt_content, mimetype='text/plain; charset=utf-8')
+        else:
+            # If no content, it means no subtitles were found
+            print(f"SRT generation failed for {tiktok_url}. Stderr: {stderr_output}")
+            return jsonify({"error": f"Subtitles not found for language '{lang}'."}), 404
+
+    except Exception as e:
+        return jsonify({"error": f"An unexpected error occurred while fetching subtitles: {str(e)}"}), 500
+
+# --- Root Endpoint (Updated for clarity) ---
 @app.route('/')
 def home():
-    return "TikTok Streaming API v5 (Module Invocation) is running."
+    return "TikTok Streaming & Subtitle API v6 is running."
