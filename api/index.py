@@ -2,11 +2,10 @@ import subprocess
 from flask import Flask, Response, request, jsonify
 import yt_dlp
 import sys
-import os
 
 app = Flask(__name__)
 
-# --- API Endpoint for Caption ---
+# --- API Endpoint for Caption (No changes) ---
 @app.route('/info')
 def get_info_endpoint():
     tiktok_url = request.args.get('url')
@@ -21,7 +20,7 @@ def get_info_endpoint():
     except Exception as e:
         return jsonify({"error": f"Could not retrieve info: {e}"}), 500
 
-# --- FINAL AND MOST ROBUST Streaming Endpoint ---
+# --- FINAL, CORRECTED Streaming Endpoint ---
 @app.route('/stream')
 def stream_video_endpoint():
     tiktok_url = request.args.get('url')
@@ -29,20 +28,13 @@ def stream_video_endpoint():
         return jsonify({"error": "Missing 'url' query parameter"}), 400
 
     try:
-        # --- THE CRITICAL FIX ---
-        # Find the directory where the Python executable is located.
-        # In a virtual environment, scripts like yt-dlp are in the same directory.
-        python_executable_dir = os.path.dirname(sys.executable)
-        # Construct the full, absolute path to the yt-dlp command.
-        yt_dlp_path = os.path.join(python_executable_dir, 'yt-dlp')
-
-        # Check if the executable actually exists at that path.
-        if not os.path.exists(yt_dlp_path):
-            return jsonify({"error": f"yt-dlp executable not found at expected path: {yt_dlp_path}"}), 500
-
-        # Now, use the full path in the command.
+        # --- THE DEFINITIVE FIX ---
+        # Instead of finding the 'yt-dlp' executable, we tell the Python
+        # interpreter to run the 'yt_dlp' module directly.
+        # This is the standard and most robust way to do this.
+        # sys.executable ensures we use the same python that is running our app.
         command = [
-            yt_dlp_path,
+            sys.executable, '-m', 'yt_dlp',
             '--format', 'best[ext=mp4]/best',
             '--output', '-',
             '--quiet',
@@ -73,9 +65,10 @@ def stream_video_endpoint():
         return Response(generate_stream(), mimetype='video/mp4')
 
     except Exception as e:
-        return jsonify({"error": f"An unexpected error occurred: {e}"}), 500
+        # This will catch any errors in starting the process itself.
+        return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
 # Root endpoint
 @app.route('/')
 def home():
-    return "TikTok Streaming API v4 (Absolute Path) is running."
+    return "TikTok Streaming API v5 (Module Invocation) is running."
