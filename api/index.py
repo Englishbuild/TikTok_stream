@@ -1,10 +1,12 @@
 import subprocess
 from flask import Flask, Response, request, jsonify
 import yt_dlp
+import sys
+import os
 
 app = Flask(__name__)
 
-# --- API Endpoint for Caption (No changes needed here) ---
+# --- API Endpoint for Caption ---
 @app.route('/info')
 def get_info_endpoint():
     tiktok_url = request.args.get('url')
@@ -19,42 +21,44 @@ def get_info_endpoint():
     except Exception as e:
         return jsonify({"error": f"Could not retrieve info: {e}"}), 500
 
-# --- NEW AND IMPROVED API Endpoint for Streaming ---
+# --- FINAL AND MOST ROBUST Streaming Endpoint ---
 @app.route('/stream')
 def stream_video_endpoint():
     tiktok_url = request.args.get('url')
     if not tiktok_url:
         return jsonify({"error": "Missing 'url' query parameter"}), 400
 
-    # Command to execute: yt-dlp <URL> -f best[ext=mp4] -o -
-    # -f best[ext=mp4] ensures we get a streamable MP4 format.
-    # -o - tells yt-dlp to pipe the final video data to standard output.
-    # -q silences logs so only video data is sent to stdout.
-    command = [
-        'yt-dlp',
-        '--format', 'best[ext=mp4]/best', # Prioritize MP4, but have a fallback
-        '--output', '-',
-        '--quiet',
-        tiktok_url
-    ]
-
     try:
-        # Use Popen to start the process and get control of its output stream
+        # --- THE CRITICAL FIX ---
+        # Find the directory where the Python executable is located.
+        # In a virtual environment, scripts like yt-dlp are in the same directory.
+        python_executable_dir = os.path.dirname(sys.executable)
+        # Construct the full, absolute path to the yt-dlp command.
+        yt_dlp_path = os.path.join(python_executable_dir, 'yt-dlp')
+
+        # Check if the executable actually exists at that path.
+        if not os.path.exists(yt_dlp_path):
+            return jsonify({"error": f"yt-dlp executable not found at expected path: {yt_dlp_path}"}), 500
+
+        # Now, use the full path in the command.
+        command = [
+            yt_dlp_path,
+            '--format', 'best[ext=mp4]/best',
+            '--output', '-',
+            '--quiet',
+            tiktok_url
+        ]
+        
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-        # Generator function to stream the content chunk by chunk
         def generate_stream():
             try:
                 while True:
-                    # Read a chunk of data from the yt-dlp process's output
                     chunk = process.stdout.read(4096)
                     if not chunk:
-                        # If there's no more data, the stream is finished
                         break
-                    # Yield the chunk to the response
                     yield chunk
                 
-                # Check for any errors that yt-dlp might have printed to stderr
                 stderr_output = process.stderr.read().decode('utf-8', 'ignore')
                 if stderr_output:
                     print(f"yt-dlp stderr: {stderr_output}")
@@ -62,20 +66,16 @@ def stream_video_endpoint():
             except Exception as e:
                 print(f"Error during streaming generation: {e}")
             finally:
-                # Ensure the process is properly terminated
                 if process.poll() is None:
                     process.terminate()
                 print("Stream process finished.")
 
-        # Return a streaming response. We explicitly set the mimetype.
         return Response(generate_stream(), mimetype='video/mp4')
 
-    except FileNotFoundError:
-        return jsonify({"error": "yt-dlp command not found in the Vercel environment."}), 500
     except Exception as e:
-        return jsonify({"error": f"An error occurred while starting the stream process: {e}"}), 500
+        return jsonify({"error": f"An unexpected error occurred: {e}"}), 500
 
-# Optional: A root endpoint to confirm the API is running
+# Root endpoint
 @app.route('/')
 def home():
-    return "TikTok Streaming API v3 (Subprocess) is running."
+    return "TikTok Streaming API v4 (Absolute Path) is running."
