@@ -18,7 +18,7 @@ def get_info_endpoint():
             caption = info.get('description') or info.get('title', 'No caption found')
             return jsonify({"caption": caption})
     except Exception as e:
-        return jsonify({"error": f"Could not retrieve info: {e}"}), 500
+        return jsonify({"error": f"Could not retrieve info: {str(e)}"}), 500
 
 # --- Streaming Endpoint (No changes) ---
 @app.route('/stream')
@@ -45,13 +45,6 @@ def stream_video_endpoint():
                     if not chunk:
                         break
                     yield chunk
-                
-                stderr_output = process.stderr.read().decode('utf-8', 'ignore')
-                if stderr_output:
-                    print(f"yt-dlp stderr: {stderr_output}")
-
-            except Exception as e:
-                print(f"Error during streaming generation: {e}")
             finally:
                 if process.poll() is None:
                     process.terminate()
@@ -62,50 +55,56 @@ def stream_video_endpoint():
     except Exception as e:
         return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
-# --- NEW API Endpoint for SRT Subtitles ---
+# --- UPDATED API Endpoint for SRT Subtitles with Cookie Support ---
 @app.route('/srt')
 def get_srt_endpoint():
     tiktok_url = request.args.get('url')
-    # Allow specifying language, default to English ('en')
+    cookie_string = request.args.get('cookie') # New: Get cookie from query params
     lang = request.args.get('lang', 'en')
 
     if not tiktok_url:
         return jsonify({"error": "Missing 'url' query parameter"}), 400
 
     try:
-        # Command to get auto-captions, convert to SRT, and print to stdout
+        # Base command for getting subtitles
         command = [
             sys.executable, '-m', 'yt_dlp',
-            '--write-auto-subs',    # Get automatically generated captions
-            '--sub-lang', lang,       # Specify the language
-            '--skip-download',      # Don't download the video
-            '--sub-format', 'srt',     # Specify SRT format
-            '--output', '-',          # Pipe output to stdout
-            tiktok_url
+            '--write-auto-subs',
+            '--sub-lang', lang,
+            '--skip-download',
+            '--sub-format', 'srt',
+            '--output', '-',
+            '--quiet' # Add quiet to prevent yt-dlp's own messages from interfering
         ]
 
-        # Use Popen to run the command
+        # --- THIS IS THE CRITICAL CHANGE ---
+        # If a cookie is provided, add it as a header to the command
+        if cookie_string:
+            print("Using provided cookie for authentication.")
+            command.extend(['--add-header', f"Cookie: {cookie_string}"])
+        else:
+            print("No cookie provided, making an anonymous request.")
+            
+        # The last argument must be the URL
+        command.append(tiktok_url)
+
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        
-        # Use communicate() to get all output once the process finishes
         stdout, stderr = process.communicate()
         
         srt_content = stdout.decode('utf-8', 'ignore')
-        stderr_output = stderr.decode('utf-8', 'ignore')
 
-        # Check if we actually got SRT content
         if srt_content.strip():
-            # Return the SRT content as plain text
             return Response(srt_content, mimetype='text/plain; charset=utf-8')
         else:
-            # If no content, it means no subtitles were found
-            print(f"SRT generation failed for {tiktok_url}. Stderr: {stderr_output}")
+            # Provide more debug info if it fails
+            error_message = stderr.decode('utf-8', 'ignore')
+            print(f"SRT generation failed for {tiktok_url}. Stderr: {error_message}")
             return jsonify({"error": f"Subtitles not found for language '{lang}'."}), 404
 
     except Exception as e:
-        return jsonify({"error": f"An unexpected error occurred while fetching subtitles: {str(e)}"}), 500
+        return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
 # --- Root Endpoint (Updated for clarity) ---
 @app.route('/')
 def home():
-    return "TikTok Streaming & Subtitle API v6 is running."
+    return "TikTok Streaming & Subtitle API v7 (Cookie Auth) is running."
